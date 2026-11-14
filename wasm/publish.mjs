@@ -5,6 +5,7 @@
 //   <prefix>/<build id>/simc.wasm, simc.mjs, worker.js, engine.json, defaults.json, sample-report.json, LICENSE.txt
 //   <prefix>/latest.json   names the build that pages should load
 // latest.json is written last, so a page never sees a build that is only half uploaded.
+// Old builds are deleted by cleanup.mjs.
 //
 // Environment: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PREFIX, SIMC_REVISION,
 // and optionally SIMC_UPSTREAM_REVISION and SIMC_UPSTREAM_DATE.
@@ -74,6 +75,7 @@ const engine = JSON.parse(files.find((file) => file.name === "engine.json").body
 if (engine.simcRevision !== revision) throw new Error("The build directory holds a build of another commit");
 
 const now = new Date();
+// cleanup.mjs reads the time back out of this name, so a change here needs one there.
 const stamp = now.toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-");
 const build = `${stamp}-${revision.slice(0, 12)}`;
 const latest = {
