@@ -1,6 +1,6 @@
 name: wasm-engine
 
-# Builds the WebAssembly engine (see wasm/README.md) and uploads it.
+# Builds the WebAssembly engine (see wasm/README.md), uploads it, and deletes old builds.
 # It only does work when the default branch has a commit that is not published yet.
 
 on:
@@ -207,3 +207,33 @@ jobs:
           SIMC_UPSTREAM_REVISION: ${{ needs.plan.outputs.upstream_revision }}
           SIMC_UPSTREAM_DATE: ${{ needs.plan.outputs.upstream_date }}
         run: node wasm/publish.mjs "$RUNNER_TEMP/engine"
+
+  # Also holds the upload keys. It deletes old builds from the bucket and runs nothing that was built.
+  # It is a job of its own so that a failure here does not look like a failed upload,
+  # and so that re-running it from the run's page does not upload again.
+  cleanup:
+    name: Delete old builds
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    environment: engine-upload
+    permissions:
+      contents: read
+    steps:
+      # Only the files the cleanup needs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.revision }}
+          sparse-checkout: |
+            /wasm/cleanup.mjs
+            /wasm/r2.mjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Delete old builds
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PREFIX: ${{ vars.R2_PREFIX }}
+        run: node wasm/cleanup.mjs

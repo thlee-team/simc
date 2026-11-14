@@ -38,7 +38,15 @@ The comment at the top of `worker.js` describes how several workers share one do
 ## Automatic builds
 
 The `wasm-engine` workflow merges new upstream commits, builds, and uploads the result.
-Each build is uploaded to its own folder, and `latest.json` names the newest one.
+Each build is uploaded to its own folder, and `latest.json` names the one pages load,
+normally the newest.
+
+After an upload, a separate job deletes old builds. A build is deleted when the build after
+it was published more than 7 days ago. The newest 3 builds are always kept, however old, and
+so is the one `latest.json` names. The comment at the top of `cleanup.mjs` has the details.
+
+With the environment variables listed there, `node wasm/cleanup.mjs --dry-run` prints what
+would be deleted without deleting anything.
 
 Upstream changes under `.github/` are never merged automatically. The workflow stops and
 asks for someone to read them first.
