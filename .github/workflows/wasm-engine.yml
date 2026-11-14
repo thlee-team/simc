@@ -184,6 +184,7 @@ jobs:
           ref: ${{ needs.plan.outputs.revision }}
           sparse-checkout: |
             /wasm/publish.mjs
+            /wasm/r2.mjs
             /wasm/worker.js
             /LICENSE
           sparse-checkout-cone-mode: false

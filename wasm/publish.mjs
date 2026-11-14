@@ -11,11 +11,11 @@
 // With ENGINE_PUBLIC_BASE (the public address of <prefix>) the upload is read back over that address:
 // the build before latest.json moves, and latest.json afterwards, in case a cache still serves the old one.
 //
-// This script runs with the upload keys. Keep it free of imports other than Node's own modules.
-import { createHash, createHmac } from "node:crypto";
+// This script runs with the upload keys. Keep it free of imports other than Node's own modules and r2.mjs.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { prefixFromEnv, send, sha256, targetFromEnv } from "./r2.mjs";
 
 const MIB = 1048576;
 // Taken from the build directory. These files come out of compiling and running upstream code,
@@ -40,62 +40,14 @@ const KEEP_FOREVER = "public, max-age=31536000, immutable";
 const POINTER_MAX_AGE = 15 * 60;
 const BRIEFLY = `public, max-age=${POINTER_MAX_AGE}`;
 
-const sha256 = (data) => createHash("sha256").update(data).digest("hex");
-const hmac = (key, data) => createHmac("sha256", key).update(data).digest();
-
-/** AWS Signature V4 for one S3 request. `headers` holds every signed header, names in lower case. R2 uses the region "auto". */
-function sign({ method, path: requestPath, headers, accessKeyId, secretAccessKey }) {
-  const amzDate = headers["x-amz-date"];
-  const day = amzDate.slice(0, 8);
-  const names = Object.keys(headers).sort();
-  const canonicalHeaders = names.map((name) => `${name}:${String(headers[name]).trim().replace(/\s+/g, " ")}\n`).join("");
-  const signedHeaders = names.join(";");
-  const canonicalRequest = [method, requestPath, "", canonicalHeaders, signedHeaders, headers["x-amz-content-sha256"]].join("\n");
-  const scope = `${day}/auto/s3/aws4_request`;
-  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, sha256(canonicalRequest)].join("\n");
-  const signingKey = hmac(hmac(hmac(hmac(`AWS4${secretAccessKey}`, day), "auto"), "s3"), "aws4_request");
-  const signature = createHmac("sha256", signingKey).update(stringToSign).digest("hex");
-  return `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-}
-
-async function put({ account, accessKeyId, secretAccessKey, bucket }, key, body, type, cacheControl) {
-  const host = `${account}.r2.cloudflarestorage.com`;
-  const requestPath = `/${bucket}/${key.split("/").map(encodeURIComponent).join("/")}`;
-  for (let attempt = 1; ; attempt++) {
-    // Sign again on every try. A signature that is too old is rejected.
-    const signed = {
-      host,
-      "x-amz-date": new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, ""),
-      "x-amz-content-sha256": sha256(body),
-      "content-type": type,
-      "cache-control": cacheControl,
-    };
-    const authorization = sign({ method: "PUT", path: requestPath, headers: signed, accessKeyId, secretAccessKey });
-    const { host: _host, ...headers } = signed;
-    const response = await fetch(`https://${host}${requestPath}`, { method: "PUT", headers: { ...headers, authorization }, body }).catch(() => ({
-      ok: false,
-      status: 0,
-      text: async () => "",
-    }));
-    if (response.ok) return;
-    // Print the error code only, not the whole answer.
-    const code = (await response.text()).match(/<Code>([A-Za-z]{1,60})<\/Code>/)?.[1] ?? "no error code";
-    const retry = response.status === 0 || response.status === 429 || response.status >= 500;
-    if (!retry || attempt >= 4) throw new Error(`${key}: upload failed (${response.status}, ${code})`);
-    await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
-  }
-}
+const put = (target, key, body, type, cacheControl) =>
+  send(target, { method: "PUT", key, headers: { "content-type": type, "cache-control": cacheControl }, body, failure: `${key}: upload failed` });
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const dir = args.find((arg) => !arg.startsWith("--"));
 if (!dir) throw new Error("usage: node wasm/publish.mjs <build dir> [--dry-run]");
 
-const need = (name) => {
-  const value = process.env[name];
-  if (!value && !dryRun) throw new Error(`${name} is not set`);
-  return value ?? "";
-};
 const optional = (name, pattern) => {
   const value = process.env[name] ?? "";
   if (value && !pattern.test(value)) throw new Error(`${name} has an unexpected format`);
@@ -106,9 +58,8 @@ const revision = process.env.SIMC_REVISION ?? "";
 if (!COMMIT.test(revision)) throw new Error("SIMC_REVISION must be a full commit id");
 const upstreamRevision = optional("SIMC_UPSTREAM_REVISION", COMMIT);
 const upstreamDate = optional("SIMC_UPSTREAM_DATE", /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$/);
-const prefix = (process.env.R2_PREFIX ?? "").replace(/^\/+|\/+$/g, "");
-if (!/^[a-z0-9][a-z0-9/_-]*$/.test(prefix)) throw new Error("R2_PREFIX is missing or has unexpected characters");
-const target = { account: need("R2_ACCOUNT_ID"), accessKeyId: need("R2_ACCESS_KEY_ID"), secretAccessKey: need("R2_SECRET_ACCESS_KEY"), bucket: need("R2_BUCKET") };
+const prefix = prefixFromEnv();
+const target = targetFromEnv({ optional: dryRun });
 const publicBase = (process.env.ENGINE_PUBLIC_BASE ?? "").replace(/\/+$/, "");
 
 const files = [
