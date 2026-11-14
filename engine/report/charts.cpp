@@ -430,6 +430,7 @@ std::string get_metric_value_name( metric_value_e val )
 }
 
 
+#ifndef SC_NO_THREADING
 void profilesets_insert_data( highchart::bar_chart_t& chart,
                   std::string_view name,
                   const color::rgb c,
@@ -516,6 +517,7 @@ void profilesets_populate_chart_data( highchart::bar_chart_t& profileset,
       profilesets_insert_data( profileset, base_name, c, baseline_data, true, baseline_value, mean );
     }
 }
+#endif
 
 }  // anonymous namespace ====================================================
 
@@ -1729,6 +1731,7 @@ void chart::generate_profilesets_chart( highchart::bar_chart_t& chart, const sim
                                         util::span<const profileset::profile_set_t*> results,
                                         util::span<const profileset::profile_set_t*> results_mean )
 {
+#ifndef SC_NO_THREADING
   bool is_multiactor_metric = util::scale_metric_is_raid( sim.profileset_metric.front() ) && sim.player_no_pet_list.size() > 1;
   const auto* baseline = sim.player_no_pet_list[ sim.profileset_report_player_index ];
 
@@ -1831,4 +1834,11 @@ void chart::generate_profilesets_chart( highchart::bar_chart_t& chart, const sim
                                    base_name, sim.profileset_metric.front(), c );
   profilesets_populate_chart_data( chart, base_offset, MAX_PROFILESET_CHART_ENTRIES, results_mean, baseline,
                                    base_name, sim.profileset_metric.front(), c, true );
+#else
+  (void)chart;
+  (void)sim;
+  (void)chart_id;
+  (void)results;
+  (void)results_mean;
+#endif
 }
